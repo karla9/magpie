@@ -1055,7 +1055,65 @@ func codexWindows(ctx context.Context, token, accountID string) (plan string, ou
 			out[i].Credits = true
 		}
 	}
+	// a workspace billed by usage has no rate-limit windows at all: what
+	// its allowance spends is the individual limit its spend control counts
+	if len(out) == 0 {
+		if w, ok := codexSpendWindow(data); ok {
+			out = append(out, w)
+		}
+	}
 	return data.PlanType, out, resets, credits, codexHeld(data), nil
+}
+
+// codexSpendWindow is a usage-based workspace's allowance as /wham/usage
+// tells it under spend_control: the individual limit it is billed against,
+// in the units that limit counts (credits), where the usage it reports. A
+// plan with rate-limit windows of its own isn't this one, so nothing is
+// said of a seat whose windows are there.
+func codexSpendWindow(u codexUsage) (QuotaWindow, bool) {
+	if u.SpendControl == nil || u.SpendControl.IndividualLimit == nil {
+		return QuotaWindow{}, false
+	}
+	l := u.SpendControl.IndividualLimit
+	of, ok := codexNumber(l.Limit)
+	if !ok || of <= 0 {
+		return QuotaWindow{}, false
+	}
+	used, _ := codexNumber(l.Used)
+	w := QuotaWindow{Name: "Credits", Amount: used, Limit: of, Unit: codexSpendUnit(l.Unit)}
+	if p, ok := codexNumber(l.UsedPercent); ok {
+		w.Used = max(0, min(100, p))
+	} else {
+		w.Used = max(0, min(100, used/of*100))
+	}
+	if l.ResetAt > 0 {
+		t := time.Unix(l.ResetAt, 0)
+		w.ResetsAt = &t
+	}
+	return w, true
+}
+
+// codexSpendUnit is a spend control's unit as the card says it: the API's
+// "credit" is credits, and anything else is its own word.
+func codexSpendUnit(u string) string {
+	switch strings.TrimSpace(u) {
+	case "", "credit":
+		return "credits"
+	}
+	return strings.TrimSpace(u)
+}
+
+// codexNumber is a spend control's figure, which the API tells as a number
+// or as a string ("5100").
+func codexNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		return f, err == nil
+	}
+	return 0, false
 }
 
 // codexGoesOnCredits reports whether the ChatGPT account goes on past its
@@ -1098,6 +1156,12 @@ type codexUsage struct {
 	} `json:"rate_limit"`
 	SpendControl *struct {
 		Reached bool `json:"reached"`
+		// the cap a usage-based workspace is billed against, when it has
+		// no rate-limit windows: {"source":"workspace_spend_controls",
+		// "unit":"credit","limit":"5100","used":"186.58",
+		// "remaining":"4913.42","used_percent":4,
+		// "reset_at":1793491200}
+		IndividualLimit *codexSpendLimit `json:"individual_limit"`
 	} `json:"spend_control"`
 	// why the account is held: "rate_limit_reached", or a workspace's
 	// "workspace_owner_usage_limit_reached" and the like
@@ -1107,6 +1171,16 @@ type codexUsage struct {
 	Resets *struct {
 		Available int `json:"available_count"`
 	} `json:"rate_limit_reset_credits"`
+}
+
+// codexSpendLimit is a workspace's individual spending cap as
+// /wham/usage tells it. Its figures come as numbers or as strings.
+type codexSpendLimit struct {
+	Unit        string `json:"unit"`
+	Limit       any    `json:"limit"`
+	Used        any    `json:"used"`
+	UsedPercent any    `json:"used_percent"`
+	ResetAt     int64  `json:"reset_at"`
 }
 
 // codexWorkspacePlans are the plans of a ChatGPT workspace: every plan
