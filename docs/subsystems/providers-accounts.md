@@ -237,6 +237,24 @@ the price is the own id's first (`ListPrice`). `TestModelIDListedAndAskedForByOw
 `TestModelIDLatestWins`, `TestModelIDMovesTheUsersRefs`,
 `TestLocalModelIDOnEveryRoute`.
 
+### Codex accounts with only a spending allowance
+
+Some ChatGPT workspace accounts (including `ent26`) return no primary or
+secondary rate window from `/wham/usage`, but expose their allowance under
+`spend_control.individual_limit`. `codexWindows` in
+[`subscription_usage.go`](../../internal/provider/subscription_usage.go) reads
+that budget as a `Spending limit` window only when neither rate window is
+present. Its used share comes from the amount spent divided by the positive
+limit, not the rounded percentage; its amount, unit and reset are preserved.
+No rolling span is inferred. Missing, non-finite, negative or zero-limit
+readings stay unknown rather than appearing unused.
+
+The window counts for routing and existing account/window caps. Credits do
+not let an account spend past this limit. Ordinary rate windows and their
+credit behavior remain unchanged, as do `CapCareful`, `CapStop` and the
+backend's `Held` decision. The regression and cap-boundary checks are in
+[`codex_spend_limit_test.go`](../../internal/provider/codex_spend_limit_test.go).
+
 ## Constraints and failure behavior
 
 An allowance deliberately not requested (a saved Claude account outside

@@ -79,11 +79,12 @@ func TestCodexUsageBasedSeatShowsItsSpendWindow(t *testing.T) {
 		t.Fatalf("windows %v, want the spend control's one", windows)
 	}
 	w := windows[0]
-	if w.Name != "Credits" || w.Unit != "credits" {
-		t.Errorf("window %q in %q, want Credits in credits", w.Name, w.Unit)
+	if w.Name != "Spending limit" || w.Unit != "credits" {
+		t.Errorf("window %q in %q, want Spending limit in credits", w.Name, w.Unit)
 	}
-	if w.Used != 4 {
-		t.Errorf("used %v%%, want the spend control's 4", w.Used)
+	want := 186.58448004722595 / 5100 * 100
+	if math.Abs(w.Used-want) > 1e-9 {
+		t.Errorf("used %v%%, want %v from the count and cap", w.Used, want)
 	}
 	if math.Abs(w.Amount-186.58448004722595) > 1e-6 || w.Limit != 5100 {
 		t.Errorf("amount %v of %v, want 186.58 of 5100", w.Amount, w.Limit)
@@ -127,7 +128,7 @@ func TestCodexWindowsStayAheadOfTheSpendControl(t *testing.T) {
 		t.Fatalf("windows %v, want the plan's two and no spend window", windows)
 	}
 	for _, w := range windows {
-		if w.Name == "Credits" {
+		if w.Name == "Spending limit" {
 			t.Errorf("the spend control was given as a window beside the plan's own: %v", w)
 		}
 	}

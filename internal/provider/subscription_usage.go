@@ -1067,7 +1067,7 @@ func codexWindows(ctx context.Context, token, accountID string) (plan string, ou
 
 // codexSpendWindow is a usage-based workspace's allowance as /wham/usage
 // tells it under spend_control: the individual limit it is billed against,
-// in the units that limit counts (credits), where the usage it reports. A
+// in the units that limit counts, with the usage it reports. A
 // plan with rate-limit windows of its own isn't this one, so nothing is
 // said of a seat whose windows are there.
 func codexSpendWindow(u codexUsage) (QuotaWindow, bool) {
@@ -1075,17 +1075,16 @@ func codexSpendWindow(u codexUsage) (QuotaWindow, bool) {
 		return QuotaWindow{}, false
 	}
 	l := u.SpendControl.IndividualLimit
-	of, ok := codexNumber(l.Limit)
-	if !ok || of <= 0 {
+	total, totalOK := number(l.Limit)
+	used, usedOK := number(l.Used)
+	if !totalOK || total <= 0 || math.IsNaN(total) || math.IsInf(total, 0) {
 		return QuotaWindow{}, false
 	}
-	used, _ := codexNumber(l.Used)
-	w := QuotaWindow{Name: "Credits", Amount: used, Limit: of, Unit: codexSpendUnit(l.Unit)}
-	if p, ok := codexNumber(l.UsedPercent); ok {
-		w.Used = max(0, min(100, p))
-	} else {
-		w.Used = max(0, min(100, used/of*100))
+	if !usedOK || used < 0 || math.IsNaN(used) || math.IsInf(used, 0) {
+		return QuotaWindow{}, false
 	}
+	w := QuotaWindow{Name: "Spending limit", Used: min(100, used/total*100),
+		Amount: used, Limit: total, Unit: codexSpendUnit(l.Unit), ResetSecs: max(0, l.ResetAfterSecs)}
 	if l.ResetAt > 0 {
 		t := time.Unix(l.ResetAt, 0)
 		w.ResetsAt = &t
@@ -1094,26 +1093,12 @@ func codexSpendWindow(u codexUsage) (QuotaWindow, bool) {
 }
 
 // codexSpendUnit is a spend control's unit as the card says it: the API's
-// "credit" is credits, and anything else is its own word.
+// "credit" is credits, and currency codes are uppercase.
 func codexSpendUnit(u string) string {
-	switch strings.TrimSpace(u) {
-	case "", "credit":
+	if strings.TrimSpace(u) == "credit" {
 		return "credits"
 	}
-	return strings.TrimSpace(u)
-}
-
-// codexNumber is a spend control's figure, which the API tells as a number
-// or as a string ("5100").
-func codexNumber(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case string:
-		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
-		return f, err == nil
-	}
-	return 0, false
+	return strings.ToUpper(strings.TrimSpace(u))
 }
 
 // codexGoesOnCredits reports whether the ChatGPT account goes on past its
@@ -1176,11 +1161,11 @@ type codexUsage struct {
 // codexSpendLimit is a workspace's individual spending cap as
 // /wham/usage tells it. Its figures come as numbers or as strings.
 type codexSpendLimit struct {
-	Unit        string `json:"unit"`
-	Limit       any    `json:"limit"`
-	Used        any    `json:"used"`
-	UsedPercent any    `json:"used_percent"`
-	ResetAt     int64  `json:"reset_at"`
+	Unit           string `json:"unit"`
+	Limit          any    `json:"limit"`
+	Used           any    `json:"used"`
+	ResetAt        int64  `json:"reset_at"`
+	ResetAfterSecs int64  `json:"reset_after_seconds"`
 }
 
 // codexWorkspacePlans are the plans of a ChatGPT workspace: every plan
